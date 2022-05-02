@@ -58,7 +58,7 @@ data.table(Column=names(d),
 )
 
 # cor matrix --------
-corr.df=enc.st.d %>% select_if(is.numeric)
+corr.df=fac.df %>% select_if(is.numeric)
 corr.df
 corMtrx <- cor(corr.df)
 print(corMtrx)
@@ -95,10 +95,17 @@ ggcorrplot(corr,
   #       ) 
 
 # var selection ------------
-subset.model=regsubsets(G3.portugese~.,data=enc.st.d,
+subset.model=regsubsets(G3.portugese~.,data=fac.df,
                         really.big=T,
                         nbest=20,method=c("exhaustive"))
 summary(subset.model)
+
+onlyf<-fac.df %>% select_if(is.factor)
+for (of in names(onlyf)) {
+  print(of)
+  print(contrasts(onlyf[,of]))
+}
+
 # 
 # plot(subset.model, scale="r2")
 plot(subset.model, scale="adjr2")
@@ -106,7 +113,7 @@ plot(subset.model, scale="adjr2")
 # plot(subset.model, scale="Cp")
 # 
 
-reg=lm(G3.portugese ~ ., data=enc.st.d)
+reg=lm(G3.portugese ~ ., data=fac.df)
 summary(reg)
 
 
@@ -117,25 +124,36 @@ summary(reg)
 # allpos
 # plot(allpos)
 
-Hmisc::describe(enc.st.d)
-
-boruta_output <- Boruta(G3.portugese ~ ., data=enc.st.d, doTrace=0)  
-plot(boruta_output)
-boruta_signif <- getSelectedAttributes(boruta_output, withTentative = TRUE)
-print(boruta_signif)  
-roughFixMod <- TentativeRoughFix(boruta_output)
-boruta_signif <- getSelectedAttributes(roughFixMod)
-print(boruta_signif)
-attStats(roughFixMod)
-# plotImpHistory(roughFixMod)
+Hmisc::describe(fac.df)
+# 
+# boruta_output <- Boruta(G3.portugese ~ ., data=fac.df, doTrace=0)  
+# plot(boruta_output)
+# boruta_signif <- getSelectedAttributes(boruta_output, withTentative = TRUE)
+# print(boruta_signif)  
+# roughFixMod <- TentativeRoughFix(boruta_output)
+# boruta_signif <- getSelectedAttributes(roughFixMod)
+# print(boruta_signif)
+# attStats(roughFixMod)
+# # plotImpHistory(roughFixMod)
 # cnm<-names(roughFixMod$finalDecision[which(roughFixMod$finalDecision == 'Confirmed')])
+# 
+# cnm
+# features<-unlist(boruta_signif)
 
-features<-unlist(boruta_signif)
+leap.features=c(
+   "school"
+  ,"Mjob"
+  ,"reason"
+  ,"guardian"
+  ,"failures.math"
+  ,"failures.portugese"
+  ,"G1.portugese"
+  ,"G2.portugese"
+)
 
+features<-append(leap.features, "G3.portugese")
 
-features<-append(features, "G3.portugese")
-
-seltd<-enc.st.d[,..features]
+seltd<-fac.df[,features]
 
 seltd<-as.data.frame(seltd)
 
@@ -160,7 +178,7 @@ xx<-cbind(
 
 eda.df<-cbind(xx, enc.st.d[,..features][,-c(1:6)])
 eda.df
-
+eda.df<-seltd
 # rank distribution
 ggplot(data=eda.df,aes(x=G3.portugese,fill=sex))+
   geom_bar(position='dodge')+
@@ -201,12 +219,10 @@ plotpervar<-function(featrs) {
 
 plot_grid(plotlist=plotpervar(intersect(names(eda.df), features)))
 
-ggpairs(eda.df,mapping=ggplot2::aes(colour = sex))
+ggpairs(eda.df,mapping=ggplot2::aes(colour = school))
 
 
 #Modelling --------
-
-
 do_model<-function(apply_feat) {
   ln=length(apply_feat)
   seq_along(apply_feat[-ln])
@@ -255,7 +271,21 @@ features<-features[features %in% c(
   ,"paid.math_no"
 ) == FALSE]
 
-features
+levels(seltd$Mjob)[levels(seltd$Mjob) %in% 
+                     c("at_home", "health", "services", "teacher")] <-
+  "home_health_service_teacher"
+
+levels(seltd$reason)[levels(seltd$reason) %in% 
+                     c("course", "home", "other")] <-
+  "course_home_other"
+
+contrasts(seltd$guardian)
+
+features<-features[features %in% c(
+   "guardian"
+  ,"reason"
+) == FALSE]
+
 leapft<-do_model(features)
 leapft
 extractmodel<-function(mft, modnum) {
@@ -270,7 +300,7 @@ calcr2jack<-function(pressval) {
 }
 
 par(mfrow=c(2,2))
-x<-extractmodel(leapft, 9)
+x<-extractmodel(leapft, 6)
 x
 
 x.selmod=x[[1]]
@@ -280,11 +310,30 @@ x.selmod
 # reg=lm(G3.portugese ~ sex_F + schoolsup_no + higher_no + studytime + 
 #          Walc + failures.math + G1.math + failures.portugese, data=seltd)
 # 
-df6 = cbind(eda.df, pred = predict(x.selmod))
+df6 = cbind(seltd, pred = predict(x.selmod))
 seltd
-ggplot(df6,aes(G3.math,G3.portugese,colour=sex,shape=schoolsup))+
+as.integer(df6$school)-1
+
+eq<-function() {
+  z<-(
+    0.4052 
+    - 0.6745 * (as.integer(df6$school)-1)
+    - 0.3593 * (as.integer(df6$Mjob)-1)
+    - 0.1910 * df6$failures.math
+    - 0.3610 * df6$failures.portugese
+    + 0.1329 * df6$G1.portugese
+    + 0.8833 * df6$G2.portugese
+  )
+  return(z)
+}
+
+eq()
+
+ggplot(df6,aes(G1.portugese+G2.portugese+failures.math+failures.portugese,
+               G3.portugese,
+               colour=school,shape=Mjob))+
   geom_point()+geom_rug()+
-  # stat_function(fun = function(G1.math) -3301.001+12842.553*G1.math,col="green" )+
+  stat_function(fun = eq, col="green" )+
   # stat_function(fun = function(G1.math) -224.628+4391.953*G1.math + 4885.557*G1.math^2 )+
   ggtitle("Price as a function of G1.math, separated by school support and gender")
 
@@ -297,12 +346,11 @@ x.pressval
 calcr2jack(x.pressval)
 
 par(mfrow=c(1,1))
-results<-predict(x.selmod,fsel)
-data.frame(results,actual=fsel$TARGET_deathRate) %>%
+results<-predict(x.selmod,seltd)
+data.frame(results,actual=seltd$G3.portugese) %>%
   ggplot(aes(x=results,y=actual)) + 
   geom_point()+
   stat_smooth(method="lm",show.legend = T)
-
 
 
 
