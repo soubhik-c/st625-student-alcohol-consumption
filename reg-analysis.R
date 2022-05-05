@@ -23,6 +23,15 @@ librarian::shelf(rstudioapi,
                  Boruta,
                  cowplot,
                  CombMSC,
+                 ggplotify,
+                 sjPlot,
+                 lme4,
+                 TMB,
+                 glmmTMB,
+                 effects,
+                 stats,
+                 AICcmodavg,
+                 lessR,
                  cran_repo = 'https://cran.r-project.org')
 
 #renv::clean()
@@ -30,6 +39,7 @@ setwd(dirname(getSourceEditorContext()$path))
 
 student.data=read.table("student-data.csv", sep=",", header=T)
 
+names(student.data)
 d=student.data
 str(d)
 
@@ -40,43 +50,202 @@ fac.df <- as.data.frame(unclass(d), stringsAsFactors = TRUE)
 if (drop.known == TRUE) {
   fac.df<-fac.df[,-c(31,32,37,38)]
 }
+
 names(fac.df)
+dim(student.data)
 
 # test normality ---------
 plot(Hmisc::describe(fac.df)) 
 
 num.only.df= fac.df %>% select(where(is.numeric))
-data.table(Column=names(num.only.df),
-           P=apply(num.only.df, 2,function(x) shapiro.test(x)$p.value)
+# dff=fac.df %>% select(where(is.factor))
+# dff<-lapply(dff, as.integer)
+# dff<-lapply(dff, function(x) x-1)
+# xx<-cbind(num.only.df, dff)
+# num.only.df<-xx[c(1:16,18:35,17)]
+
+norm.df<-d %>% select(where(is.numeric))
+data.table(Column=names(norm.df),
+           P=apply(norm.df, 2,function(x) shapiro.test(x)$p.value)
 )
 
+# some EDA dataset graphs --------------
+
+plotpervar<-function(featrs) {
+  ln=length(featrs)
+  plots.elems<-list()
+  for(i in seq_along(featrs[-ln])) {
+    plots.elems[[i]]<-
+      ggplot(num.only.df,aes_string(featrs[c(ln)],featrs[c(i)],colour="school"))+
+      geom_point()+geom_rug()
+  }
+  
+  return (plots.elems)
+}
+
+intersect(names(eda.df), features)
+plot_grid(plotlist=plotpervar(names(num.only.df)))
+
+# normal distribution --------
+
+h2<-ggplot(d, aes(x = G3.portugese)) + 
+  geom_histogram(aes(y = ..density.., fill=..count..), bins=20) +
+  scale_fill_gradient("Legend",low = "green", high = "blue")+
+  geom_density(color="red") 
+student<-d
+h1<-as.grob(expression(hist(student$G3.portugese)))
+grid.newpage()
+grid.draw(h2)
+vp = viewport(x=.3, y=.75, width=.35, height=.3)
+pushViewport(vp)
+grid.draw(h1)
+upViewport()
+
+
 # cor matrix --------
-corMtrx <- cor(num.only.df)
-print(corMtrx)
-highcorr=findCorrelation(corMtrx, names=F, exact=F, cutoff=0.5)
-highcorr
+getcorrmtx<-function(.df, threshold) {
+  corMtrx <- cor(.df)
+  print(corMtrx)
+  highcorr=findCorrelation(corMtrx, names=F, exact=F, cutoff=threshold)
+  return(names(.df[,highcorr]))
+}
 
-names(num.only.df[,highcorr])
+getcorrmtx(num.only.df, .5)
 
-# dims=length(colnames(corMtrx))
-# corrDF <- expand.grid(row = 1:dims, col = 1:dims)
-# corrDF$correlation <- as.vector(corMtrx)
-# levelplot(correlation ~ row + col, corrDF)
+names(fac.df)
 
+
+# EDA DataSet-------------
+p1<-ggplot(fac.df, aes(Dalc, fill = sex)) +
+  geom_histogram(position = "dodge") +
+  ggtitle("Students weekday alcohol consumption")
+
+p2<-ggplot(fac.df, aes(G3.portugese, fill = sex)) +
+  geom_histogram(position = "dodge") +
+  ggtitle("Students Portuguese Final Grades")
+
+cowplot::plot_grid(p1, p2)
+
+
+
+
+fdf<-fac.df
+
+gg=fdf %>%
+mutate(binCounts = cut(G3.portugese, breaks = seq(0, 100, by = 5))) %>%
+  group_by(binCounts) %>%
+  mutate(sumVal = sum(G3.portugese)) %>%
+  ungroup() %>%
+  group_by(binCounts, G3.portugese) %>%
+  summarise(prct = sum(G3.portugese)/mean(sumVal))
+
+gg=fdf %>%
+  mutate(binCounts = cut(G3.portugese, breaks = seq(0, 100, by = 5))) %>%
+  group_by(binCounts) %>%
+  mutate(sumVal = mean(G3.portugese)) %>%
+  ungroup() %>%
+  group_by(binCounts, school, sex) %>%
+  summarise(student_percent = sum(G3.portugese)/mean(sumVal))
+
+ggplot(gg) +
+  geom_bar(aes(x=binCounts, y=student_percent, fill=sex), stat="identity") +
+  theme(axis.text.x=element_text(angle = 90, hjust=1))
+
+
+gg=fdf %>%
+  mutate(binCounts = cut(G3.portugese, breaks = seq(0, 100, by = 5))) %>%
+  group_by(binCounts) %>%
+  mutate(sumVal = mean(G3.portugese)) %>%
+  ungroup() %>%
+  group_by(binCounts, sex, Dalc, Walc) %>%
+  summarise(student_percent = sum(G3.portugese)/mean(sumVal))
+
+gg<-fdf %>% group_by(school, sex) %>% summarise(ct=n()) %>% ungroup()
+
+gg
+
+ggplot(subset(fac.df),aes(x=Dalc,y=G3.portugese,colour=sex))+
+  geom_point()+geom_rug()+ geom_abline(intercept = 147, slope = 2, color="blue",
+                                       linetype="dotted", size=1)+
+  ggtitle("Percent of Poverty and Mortality Rate by Region, separated by rank")
+
+gg<-fdf %>% group_by(Dalc, sex) %>% summarise(ct=n()) %>% ungroup()
+
+
+gg<-fdf %>% mutate(binCounts = cut(age, breaks = seq(0, 100, by = 5))) %>%
+  group_by(binCounts) %>%
+  mutate(avgAge = mean(age)) %>%
+  ungroup() %>%
+  group_by(binCounts) %>%
+  summarize(mean_age=mean(avgAge))
+  
+pie(gg$mean_age, gg$binCounts, main="Age classification of students")
+
+pi1<-PieChart(mean_age, hole=0, values="%", data=gg, fill=1:4, main="Age classification of students")
+
+
+gg<-fdf %>% mutate(binCounts = cut(studytime, breaks = seq(0, 100, by = 5))) %>%
+  group_by(binCounts) %>%
+  mutate(avgStudyTime = mean(studytime)) %>%
+  ungroup() %>%
+  group_by(binCounts) %>%
+  summarize(mean_st=mean(avgStudyTime))
+
+
+
+pi2<-PieChart(studytime, hole=0, values="%", data=fdf, fill=1:4, main="StudyTime of students")
+
+par(mfcol=c(2,1))
+PieChart(age, hole=0, values="%", data=fdf, fill=1:4, main="Age of students")
+PieChart(studytime, data=fdf)
+
+cowplot::plot_grid(pi1, pi2)
+
+gg
+
+ggplot(fac.df, aes(schoolsup, fill = sex)) +
+  geom_histogram(position = "dodge") +
+  ggtitle("Students weekday alcohol consumption")
+
++
+  geom_point()+geom_rug()
+  
+ggplot(gg) +
+  geom_bar(aes(x=school, y=ct, fill=sex), stat="identity") +
+  theme(axis.text.x=element_text(angle = 90, hjust=1))
+
+geom_point()+geom_rug()+
+  
+names(fdf)
+ggplot(data=fdf,aes(x=age,y=Dalc, col=sex))+ 
+  stat_smooth(method=lm)+ 
+  geom_point(shape=21)+
+  # annotate(geom='text',x=40,y=125000,size=3.5,label='y = 985.3x + 91718.7 (p < 0.001)',family='Times')+
+  ggtitle("Straight line fit expressing salary as a function of experience")
+
+
+print(plot)
+
+plot(fdf$age, fdf$Dalc, col=fdf$sex)
+
+
+# num.only.df<-d%>% select(where(is.numeric))
 corr = round(cor(num.only.df), 2)
 p.mat <- cor_pmat(num.only.df)
 ggcorrplot(corr,
            colors = c("white", "white", "red"),
            type = c("lower"),
-           insig = c("pch", "blank"), pch = 10, pch.col = "gray", pch.cex =1,
+           insig = c("pch", "blank"), pch = 1, pch.col = "gray", pch.cex =1,
            hc.order=F,
            hc.method = "median",
-           sig.level=.01,
+           sig.level=.1,
            tl.srt = 90,
            tl.cex=9,
            outline.color = "white",
            ggtheme=ggplot2::theme_dark(),
            p.mat = p.mat,
+           lab=TRUE,
+           digits=1,
            title="Correlation heatmap among student variables")  
 # +
 #   theme(axis.text.x = element_text(margin=margin(0,0,-5,-5)),  # Order: top, right, bottom, left
@@ -97,7 +266,7 @@ for (of in names(onlyf)) {
 }
 
 # 
-# plot(subset.model, scale="r2")
+plot(subset.model, scale="r2")
 plot(subset.model, scale="adjr2")
 plot(subset.model, scale="bic")
 plot(subset.model, scale="Cp")
@@ -139,7 +308,22 @@ seltd<-fac.df[,features]
 
 seltd<-as.data.frame(seltd)
 
-features
+#reshuffle seltd cols as per corrmtx------
+x<-seltd%>%select_if(is.numeric)
+y<-seltd%>%select_if(is.factor)
+y<-sapply(y, as.integer)-1
+reshuf.features<-getcorrmtx(cbind(x,y), .01)
+reshuf.features
+
+nm=setdiff(names(seltd), reshuf.features)
+nm
+rb.seltd<-cbind(seltd[,reshuf.features], absences.math=seltd[,nm])
+names(rb.seltd)
+
+rb.seltd<-cbind(rb.seltd[, !names(rb.seltd) %in% c("G3.portugese")],
+      G3.portugese=rb.seltd[, names(rb.seltd) %in% c("G3.portugese")])
+names(rb.seltd)
+seltd<-rb.seltd
 
 # EDA--------------
 eda.df<-seltd
@@ -207,18 +391,20 @@ if (drop.known == FALSE) {
     ggtitle("Density curves showing grade distribution, separated by gender and higer edu aspiration")
   
   # boxplots
-  ggplot(data=eda.df,aes(x=school,y=G3.portugese,fill=sex))+
+  p1<-ggplot(data=eda.df,aes(x=school,y=G3.portugese,fill=sex))+
     geom_boxplot(notch=TRUE)+
     facet_grid(. ~ school + higher)+
-    ggtitle("Notched boxplots showing grade distribution, separated by school and higher edu aspiration")
+    ggtitle("Boxplots showing grade distribution, separated by school and higher edu aspiration")
   
   # violinplots
-  ggplot(data=eda.df,aes(x=sex,y=G3.portugese,fill=sex))+
+  p2<-ggplot(data=eda.df,aes(x=sex,y=G3.portugese,fill=sex))+
     geom_violin()+
     geom_boxplot(fill='darkred',width=0.1,notch=TRUE)+
     geom_point(position='jitter',size=1)+
     facet_grid(. ~ school + higher)+
-    ggtitle("Notched violinplots showing grade distribution, separated by school and higher edu aspiration")
+    ggtitle("Violinplots showing grade distribution, separated by school and higher edu aspiration")
+  
+  plot_grid(p1, p2, nrow=2)
   
   plotpervar<-function(featrs) {
     ln=length(featrs)
@@ -231,14 +417,18 @@ if (drop.known == FALSE) {
     
     return (plots.elems)
   }
-  
+
+  ln=length(names(eda.df))
+  eda.df<-seltd
   intersect(names(eda.df), features)
   plot_grid(plotlist=plotpervar(intersect(names(eda.df), features)))
   
-  ln=length(names(eda.df))
-  eda.df<-seltd
   eda.df<-cbind(G3.portugese=eda.df[,ln], eda.df[,-c(1:4,ln)], eda.df[,c(1:4)])
   ggpairs(eda.df,mapping=ggplot2::aes(colour = sex))
+
+  names(eda.df)
+  ggplot(eda.df,aes_string("G3.portugese","G3.math",colour="sex"))+
+    geom_point()+geom_rug()
   
 }
 
@@ -278,12 +468,13 @@ if (drop.known == FALSE) {
 } else {
   
   features<-features[features %in% c(
-    "age"
+    # "age"
   ) == FALSE]
   
 }
 
-leapft<-do_model(features)
+names(seltd)
+leapft<-do_model(names(seltd))
 leapft
 extractmodel<-function(mft, modnum) {
   return(list(mft[[1]][[modnum]],
@@ -300,20 +491,37 @@ par(mfrow=c(2,2))
 if (drop.known == FALSE) {
   x<-extractmodel(leapft, 6)
 } else {
-  x<-extractmodel(leapft, 7)
+  x<-extractmodel(leapft, 8)
 }
 x
 
 x.selmod=x[[1]]
 x.pressval=x[[2]]
 
-x.selmod
+summary(x.selmod)
+anova(x.selmod)
+AIC(x.selmod)
+
+mod.names <- c("")
+
+leapft[[1]]
+aictab(cand.set=leapft[[1]])
+
 # reg=lm(G3.portugese ~ sex_F + schoolsup_no + higher_no + studytime + 
 #          Walc + failures.math + G1.math + failures.portugese, data=seltd)
 # 
 df6 = cbind(seltd, pred = predict(x.selmod))
-seltd
-as.integer(df6$school)-1
+
+# df6$school<-as.integer(df6$school)-1
+# df6$sex<-as.integer(df6$sex)-1
+df6$higher<-as.integer(df6$higher)-1
+
+df6$Dalc<-as.integer(df6$Dalc)-1
+names(df6)
+
+-0.32301 + 0.31273 * G3.math 
+- 1.44057 * failures.portugese 
+- 2.11560 * school - 1.10659 * sex + 1.91890 * higher + 0.58411 * age - 0.46871 * Dalc - 0.05219 * absences.math
 
 if (drop.known == FALSE) {
   eq<-function() {
@@ -340,35 +548,67 @@ if (drop.known == FALSE) {
     ggtitle("Price as a function of G1.math, separated by school support and gender")
   
 } else {
-  eq<-function() {
-    z<-(
-      9.84446 
-      -1.34579 * (as.integer(df6$school)-1)
-      -1.16412 * (as.integer(df6$sex)-1)
-      +1.37463 * (as.integer(df6$higher)-1)
-      -0.43644 *  (as.integer(df6$Dalc)-1)
-      -0.04056 * df6$absences.math
-      +0.29721 * df6$G3.math
-      -1.18926 * df6$failures.portugese
-    )
-    return(z)
+  eq<-function(.df) {
+      -0.32301 
+      +0.31273 * df6$G3.math
+      -1.44057 * df6$failures.portugese
+      -2.11560 * (as.integer(df6$school)-1)
+      -1.10659 * (as.integer(df6$sex)-1)
+      +1.91890 * (as.integer(df6$higher)-1)
+      +0.58411 * df6$age
+      -0.46871 * (as.integer(df6$Dalc)-1)
+      -0.05219 * df6$absences.math
   }
-  
+
   eq()
   
-  ggplot(df6,aes(G3.math+absences.math+failures.portugese,
+  ggplot(df6, aes(-0.32301 
+                  +0.31273 * G3.math
+                  -1.44057 * failures.portugese 
+                  -2.11560 * (as.integer(school)-1)
+                  -1.10659 * (as.integer(sex)-1)
+                  +1.91890 * higher
+                  +0.58411 * age
+                  -0.46871 * Dalc
+                  -0.05219 * absences.math
+                  ,
                  G3.portugese,
-                 colour=school,shape=sex))+
+                 colour=sex,shape=school))+
     geom_point()+geom_rug()+
-    stat_function(fun = eq, col="green" )+
+    stat_function(fun = function(.x) {
+      1 * .x
+    },
+    colour="green" )+
     # stat_function(fun = function(G1.math) -224.628+4391.953*G1.math + 4885.557*G1.math^2 )+
-    ggtitle("Price as a function of G1.math, separated by school support and gender")
-  
+    ggtitle("G3 Portuguese grade best line fit")
+
 }
 
 ols_coll_diag(x.selmod)
 
-plot(x.selmod)
+
+xp<-plot_model(x.selmod, type = "eff")
+
+plot_grid(xp)
+
+# lm<-lmer(G3.portugese ~ Dalc + (Dalc | school), 
+#         seltd)
+# 
+# plot_model(x.selmod, type = "re")
+# 
+
+plot_model(x.selmod)
+p <- plot_model(x.selmod, type = "diag")
+plot_grid(p)
+
+
+xxp<-plot_model(x.selmod, type = "pred", terms = c("Dalc",
+                                                   "sex",
+                                                   "school",
+                                                   "higher"))
+
+plot_grid(xxp)
+
 
 x.pressval
 
